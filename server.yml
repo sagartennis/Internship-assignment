@@ -1,0 +1,164 @@
+Description: >
+  Sagar Sathyanarayanan / Internship assignment - Server Infrastructure
+  This is a template to deploy the Server infrastructure of the project. The infrastructure contains 2 security groups-
+   one for Private EC2 Instance and another for Public EC2 Instance.
+
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names.
+    Type: String
+
+Resources:
+
+# A security group acts as a virtual firewall for your EC2 instances to control incoming and outgoing traffic
+  SecGroupPublic:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Public EC2
+      VpcId:
+         Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+
+# A security group acts as a virtual firewall for your EC2 instances to control incoming and outgoing traffic. This security group
+# only contains inbound rules.
+  SecGroupPrivate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Private EC2
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+
+# A security group for the load balancer  
+  SecGroupLB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Load Balancer
+      VpcId:
+         Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+
+# A EC2 Instane created using Linux base image  
+  EC2PublicSubnet:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0cf6f5c8a62fa5da6
+      InstanceType: t2.micro
+      
+      SubnetId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-PublicSubnet1"
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      SecurityGroupIds:
+        - Ref: SecGroupPublic
+      BlockDeviceMappings:
+        - DeviceName: /dev/sdk
+          Ebs:
+            VolumeSize: 10
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public EC2
+
+# A EC2 Instane created using Ubuntu version 20 base image
+  EC2PrivateSubnet:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-03d5c68bab01f3496
+      InstanceType: t2.micro
+      
+      SubnetId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-PrivateSubnet1"
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      SecurityGroupIds:
+        - Ref: SecGroupPrivate
+      BlockDeviceMappings:
+        - DeviceName: /dev/sdk
+          Ebs:
+            VolumeSize: 10
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private EC2
+
+# A target group tells a load balancer where to direct traffic to
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Fn::ImportValue: 
+          Fn::Sub: "${EnvironmentName}-VPCID"
+
+# Elastic Load Balancing automatically distributes your incoming traffic across multiple targets, such as EC2 instances.
+# Since I have two EC2, I decided to create a load balancer. 
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PublicSubnet1"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PrivateSubnet2"
+      SecurityGroups:
+      - Ref: SecGroupLB
+      
+# A load balancer requires a listener. A listener is a process that checks for connection requests using the protocol 
+# and port that you specify in your code.
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: "forward"
+        TargetGroupArn: !Ref WebAppTargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: "80"
+      Protocol: "HTTP"
+
+# a listener rule determines how the load balancer routes request to the registered targets.
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: "forward"
+        TargetGroupArn: !Ref WebAppTargetGroup
+      Conditions:
+      - Field: "path-pattern"
+        Values: ["/"]
+      ListenerArn: !Ref Listener
+      Priority: "1"
+
+# I have not created a Auto-Scaling group since I have only 2 ec2 instances. This AWS service monitors 
+# the EC2 instances and automatically adjusts the running count by adding/removing EC2 instances,
+# ensuring that a desired number of servers (EC2 instances) are always up and running. I have not added an autoscaler since there is no 
+# app running inside of the EC2 instance
+
+
+  
